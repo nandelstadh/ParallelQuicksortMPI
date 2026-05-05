@@ -13,11 +13,26 @@ int main(int argc, char* argv[]) {
     }
     char* input = argv[0];
     char* output = argv[1];
-    int pivot = atoi(argv[2]);
+    int pivot_strategy = atoi(argv[2]);
     int** elements;
-    int n;
+    int** my_elements;
+    int n, local_n, myid, n_proc;
+
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &n_proc);
+    MPI_Comm_rank(MPI_COMM_WORLD, &myid);
 
     n = read_input(input, elements);
+    local_n = distribute_from_root(*elements, n, my_elements);
+    qsort(my_elements, local_n, sizeof(int), compare);
+
+    double start = MPI_Wtime();
+    global_sort(elements, n, MPI_COMM_WORLD, pivot_strategy);
+    double time = MPI_Wtime() - start;
+    printf("Time elapsed: %f\n", time);
+
+    gather_on_root(*elements, *my_elements, local_n);
+    check_and_print(*elements, n, output);
 
     return 0;
 }
@@ -75,7 +90,9 @@ void gather_on_root(int* all_elements, int* my_elements, int local_n) {
  * @param pivot_strategy Tells how to select the pivot element. See documentation of select_pivot in pivot.h.
  * @return New length of *elements
  */
-int global_sort(int** elements, int n, MPI_Comm, int pivot_strategy);
+int global_sort(int** elements, int n, MPI_Comm, int pivot_strategy) {
+    return 0;
+}
 
 /**
  * Merge v1 and v2 to one array, sorted in ascending order, and store the result
