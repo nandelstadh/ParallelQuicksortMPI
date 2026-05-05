@@ -31,7 +31,26 @@ int main(int argc, char* argv[]) {
  * @param my_elements Pointer to buffer where the local elements will be stored
  * @return Number of elements received by the current process
  */
-int distribute_from_root(int* all_elements, int n, int** my_elements);
+int distribute_from_root(int* all_elements, int n, int** my_elements) {
+    int myid, n_proc;
+    MPI_Comm_size(MPI_COMM_WORLD, &n_proc);
+    MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+    int block_size = n / n_proc;
+    int remainder = n % n_proc;
+
+    int start, length;
+
+    if (myid < remainder) {
+        start = myid * block_size + myid;
+        length = block_size + 1;
+    } else {
+        start = myid * block_size + remainder;
+        length = block_size;
+    }
+
+    MPI_Scatter(all_elements, length, MPI_INT, my_elements, length, MPI_INT, 0, MPI_COMM_WORLD);
+    return length;
+}
 
 /**
  * Gather elements from all processes on root. Put root's elements first and
@@ -41,7 +60,9 @@ int distribute_from_root(int* all_elements, int n, int** my_elements);
  * @param my_elements Elements to be gathered from the current process
  * @param local_n Number of elements in my_elements
  */
-void gather_on_root(int* all_elements, int* my_elements, int local_n);
+void gather_on_root(int* all_elements, int* my_elements, int local_n) {
+    MPI_Gather(my_elements, local_n, MPI_INT, all_elements, local_n, MPI_INT, 0, MPI_COMM_WORLD);
+}
 
 /**
  * Perform the global part of parallel quick sort. This function assumes that
