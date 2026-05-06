@@ -35,7 +35,7 @@ int main(int argc, char* argv[]) {
 
     gather_on_root(elements, my_elements, local_n);
     if (myid == 0) {
-        printf("Time elapsed: %f\n", max_time);
+        printf("%d,%d,%d,%f\n", n, n_proc, pivot_strategy, max_time);
         check_and_print(elements, n, output);
     }
 
