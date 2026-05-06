@@ -34,6 +34,7 @@ int main(int argc, char* argv[]) {
     gather_on_root(*elements, *my_elements, local_n);
     check_and_print(*elements, n, output);
 
+    MPI_Finalize();
     return 0;
 }
 
@@ -90,8 +91,74 @@ void gather_on_root(int* all_elements, int* my_elements, int local_n) {
  * @param pivot_strategy Tells how to select the pivot element. See documentation of select_pivot in pivot.h.
  * @return New length of *elements
  */
-int global_sort(int** elements, int n, MPI_Comm, int pivot_strategy) {
-    return 0;
+int global_sort(int** elements, int n, MPI_Comm communicator, int pivot_strategy) {
+    int n_proc, myid, wid, wsize;
+    MPI_Comm_size(communicator, &n_proc);
+    MPI_Comm_rank(communicator, &myid);
+    MPI_Comm_rank(MPI_COMM_WORLD, &wid);
+    MPI_Comm_size(MPI_COMM_WORLD, &wsize);
+    if (wsize == 1) return n;
+
+    /* We select our pivot and get its index*/
+    int idx = select_pivot(pivot_strategy, *elements, n, communicator);
+
+    /*Split data into larger and smaller*/
+    int* v1 = elements[0];
+    int* v2 = elements[idx];
+
+    int n1 = idx;
+    int n2 = n - idx;
+
+    /*Exchange data pairwise between processors*/
+    int half = n_proc / 2;
+    int partner = (myid < half) ? (wid + half) : (wid - half);
+
+    // First we need to exchange list and pivot data
+    int data[3] = {n1, n2, idx};
+    int partner_data[2];
+    MPI_Sendrecv(data, 3, MPI_INT, partner, 0, partner_data, 3, MPI_INT, partner, 0, communicator, NULL);
+
+    // Then we can actually exchange the lists
+    int *temp1, temp2;
+    int* buf;
+    if (myid < half) {
+        n1 = n1;
+        int buf_n = partner_data[0];
+        buf = malloc(sizeof(int) * buf_n);
+        MPI_Sendrecv(v2, n2, MPI_INT, partner, 0, buf, buf_n, MPI_INT, partner, 0, communicator, NULL);
+        n2 = buf_n;
+        v2 = buf;
+    } else {
+        int buf_n = partner_data[1];
+        buf = malloc(sizeof(int) * buf_n);
+        MPI_Sendrecv(v1, n1, MPI_INT, partner, 0, buf, buf_n, MPI_INT, partner, 0, communicator, NULL);
+        n2 = n2;
+        n1 = buf_n;
+        v2 = buf;
+    }
+
+    free(buf);
+
+    /*Merge the data into one list*/
+    int* merged;
+    merged = malloc((n1 + n2) * sizeof(int));
+    merge_ascending(v1, n1, v2, n2, merged);
+    elements = &merged;
+
+    /*Recurse*/
+    int color;
+
+    if (myid < n_proc / 2) {
+        color = 0;
+    } else {
+        color = 1;
+    }
+
+    MPI_Comm recursion_comm;
+    MPI_Comm_split(communicator, color, myid, &recursion_comm);
+    global_sort(elements, n1 + n2, communicator, pivot_strategy);
+    free(merged);
+    return n1 + n2;
 }
 
 /**

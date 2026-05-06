@@ -52,23 +52,24 @@ int get_median(int* elements, int n) {
  */
 /*We want to only call this from the root*/
 int select_pivot(int pivot_strategy, int* elements, int n, MPI_Comm communicator) {
-    int idx = -1;
+    int pivot;
     switch (pivot_strategy) {
         case 0:
-            select_pivot_smallest_root(elements, n, communicator);
+            pivot = select_pivot_smallest_root(elements, n, communicator);
+            return get_larger_index(elements, n, pivot);
         case 1:
-            select_pivot_median_root(elements, n, communicator);
-            break;
+            pivot = select_pivot_median_root(elements, n, communicator);
+            return get_larger_index(elements, n, pivot);
         case 2:
-            select_pivot_mean_median(elements, n, communicator);
-            break;
+            pivot = select_pivot_mean_median(elements, n, communicator);
+            return get_larger_index(elements, n, pivot);
         case 3:
-            select_pivot_median_median(elements, n, communicator);
+            pivot = select_pivot_median_median(elements, n, communicator);
+            return get_larger_index(elements, n, pivot);
         default:
             printf("Invalid pivot selection\n");
-            break;
+            return -1;
     }
-    return idx;
 }
 
 /*All of these should scatter the info to all the nodes straight away*/
