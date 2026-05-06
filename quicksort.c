@@ -40,6 +40,7 @@ int main(int argc, char* argv[]) {
     }
 
     free(elements);
+    free(my_elements);
     MPI_Finalize();
     return 0;
 }
@@ -175,6 +176,7 @@ int global_sort(int** elements, int n, MPI_Comm communicator, int pivot_strategy
     MPI_Comm_split(communicator, color, myid, &recursion_comm);
     n = global_sort(elements, n1 + n2, recursion_comm, pivot_strategy);
     free(buf);
+    MPI_Comm_free(&recursion_comm);
     return n;
 }
 
