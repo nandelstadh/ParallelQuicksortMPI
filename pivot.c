@@ -10,11 +10,10 @@
  * @return 0 if *v1==*v2, a positive and negative number of *v1>*v2 and *v1<*v2 respectively
  */
 int compare(const void* v1, const void* v2) {
-    double d1 = *(const double*)v1;
-    double d2 = *(const double*)v1;
-    return (d1 > d2) - (d1 < d2);
+    const int* i1 = (const int*)v1;
+    const int* i2 = (const int*)v2;
+    return (*i1 > *i2) - (*i1 < *i2);
 }
-
 /**
  * Find the index of the first value in elements that is larger than val
  * @param elements Array to search in
@@ -24,7 +23,7 @@ int compare(const void* v1, const void* v2) {
  */
 int get_larger_index(int* elements, int n, int val) {
     for (int i = 0; i < n; i++) {
-        if (i > val) return i;
+        if (elements[i] > val) return i;
     }
     return n;
 }
@@ -89,11 +88,11 @@ int select_pivot_median_root(int* elements, int n, MPI_Comm communicator) {
  * See select pivot!
  */
 int select_pivot_mean_median(int* elements, int n, MPI_Comm communicator) {
-    int n_proc, pivot;
-    int glob_pivot = -1;
+    int n_proc, pivot, sum;
+    pivot = get_median(elements, n);
     MPI_Comm_size(communicator, &n_proc);
-    MPI_Reduce(&pivot, &pivot, 1, MPI_INT, MPI_SUM, 0, communicator);
-    pivot = pivot / n_proc;
+    MPI_Reduce(&pivot, &sum, 1, MPI_INT, MPI_SUM, 0, communicator);
+    pivot = sum / n_proc;
     MPI_Bcast(&pivot, 1, MPI_INT, 0, communicator);
     return pivot;
 }
@@ -103,12 +102,13 @@ int select_pivot_mean_median(int* elements, int n, MPI_Comm communicator) {
  */
 int select_pivot_median_median(int* elements, int n, MPI_Comm communicator) {
     int n_proc, pivot, myid;
+    pivot = get_median(elements, n);
     MPI_Comm_size(communicator, &n_proc);
     MPI_Comm_rank(communicator, &myid);
     int pivots[n_proc];
     MPI_Gather(&pivot, 1, MPI_INT, pivots, 1, MPI_INT, 0, communicator);
     qsort(pivots, n_proc, sizeof(int), compare);
-    pivot = pivots[n_proc / 2];
+    pivot = get_median(pivots, n_proc);
     MPI_Bcast(&pivot, 1, MPI_INT, 0, communicator);
     return pivot;
 }

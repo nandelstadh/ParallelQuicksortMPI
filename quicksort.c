@@ -8,32 +8,38 @@
 #include "pivot.h"
 
 int main(int argc, char* argv[]) {
-    if (argc != 3) {
+    if (argc != 4) {
         printf("Expected: quicksort input output pivot\n");
+        return -1;
     }
-    char* input = argv[0];
-    char* output = argv[1];
-    int pivot_strategy = atoi(argv[2]);
-    int** elements;
-    int** my_elements;
+    char* input = argv[1];
+    char* output = argv[2];
+    int pivot_strategy = atoi(argv[3]);
+    int* elements;
+    int* my_elements;
     int n, local_n, myid, n_proc;
 
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &n_proc);
     MPI_Comm_rank(MPI_COMM_WORLD, &myid);
 
-    n = read_input(input, elements);
-    local_n = distribute_from_root(*elements, n, my_elements);
+    n = read_input(input, &elements);
+    local_n = distribute_from_root(elements, n, &my_elements);
     qsort(my_elements, local_n, sizeof(int), compare);
 
     double start = MPI_Wtime();
-    global_sort(elements, n, MPI_COMM_WORLD, pivot_strategy);
+    local_n = global_sort(&my_elements, local_n, MPI_COMM_WORLD, pivot_strategy);
     double time = MPI_Wtime() - start;
-    printf("Time elapsed: %f\n", time);
+    double max_time;
+    MPI_Reduce(&time, &max_time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
-    gather_on_root(*elements, *my_elements, local_n);
-    check_and_print(*elements, n, output);
+    gather_on_root(elements, my_elements, local_n);
+    if (myid == 0) {
+        printf("Time elapsed: %f\n", max_time);
+        check_and_print(elements, n, output);
+    }
 
+    free(elements);
     MPI_Finalize();
     return 0;
 }
@@ -54,18 +60,22 @@ int distribute_from_root(int* all_elements, int n, int** my_elements) {
     int block_size = n / n_proc;
     int remainder = n % n_proc;
 
-    int start, length;
+    int counts[n_proc];
+    int displs[n_proc];
 
-    if (myid < remainder) {
-        start = myid * block_size + myid;
-        length = block_size + 1;
-    } else {
-        start = myid * block_size + remainder;
-        length = block_size;
+    for (int id = 0; id < n_proc; id++) {
+        if (id < remainder) {
+            displs[id] = id * block_size + id;
+            counts[id] = block_size + 1;
+        } else {
+            displs[id] = id * block_size + remainder;
+            counts[id] = block_size;
+        }
     }
 
-    MPI_Scatter(all_elements, length, MPI_INT, my_elements, length, MPI_INT, 0, MPI_COMM_WORLD);
-    return length;
+    *my_elements = malloc(sizeof(int) * counts[myid]);
+    MPI_Scatterv(all_elements, counts, displs, MPI_INT, *my_elements, counts[myid], MPI_INT, 0, MPI_COMM_WORLD);
+    return counts[myid];
 }
 
 /**
@@ -77,7 +87,21 @@ int distribute_from_root(int* all_elements, int n, int** my_elements) {
  * @param local_n Number of elements in my_elements
  */
 void gather_on_root(int* all_elements, int* my_elements, int local_n) {
-    MPI_Gather(my_elements, local_n, MPI_INT, all_elements, local_n, MPI_INT, 0, MPI_COMM_WORLD);
+    int myid, n_proc;
+    MPI_Comm_size(MPI_COMM_WORLD, &n_proc);
+    MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+    int counts[n_proc];
+    int displs[n_proc];
+    displs[0] = 0;
+
+    MPI_Gather(&local_n, 1, MPI_INT, counts, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    if (myid == 0) {
+        for (int i = 1; i < n_proc; i++) {
+            displs[i] = displs[i - 1] + counts[i - 1];
+        }
+    }
+    MPI_Gatherv(my_elements, local_n, MPI_INT, all_elements, counts, displs, MPI_INT, 0, MPI_COMM_WORLD);
 }
 
 /**
@@ -92,58 +116,51 @@ void gather_on_root(int* all_elements, int* my_elements, int local_n) {
  * @return New length of *elements
  */
 int global_sort(int** elements, int n, MPI_Comm communicator, int pivot_strategy) {
-    int n_proc, myid, wid, wsize;
+    int n_proc, myid;
     MPI_Comm_size(communicator, &n_proc);
     MPI_Comm_rank(communicator, &myid);
-    MPI_Comm_rank(MPI_COMM_WORLD, &wid);
-    MPI_Comm_size(MPI_COMM_WORLD, &wsize);
-    if (wsize == 1) return n;
+    if (n_proc == 1) return n;
 
     /* We select our pivot and get its index*/
     int idx = select_pivot(pivot_strategy, *elements, n, communicator);
 
     /*Split data into larger and smaller*/
-    int* v1 = elements[0];
-    int* v2 = elements[idx];
+    int* v1 = *elements;
+    int* v2 = (*elements) + idx;
 
     int n1 = idx;
     int n2 = n - idx;
 
     /*Exchange data pairwise between processors*/
     int half = n_proc / 2;
-    int partner = (myid < half) ? (wid + half) : (wid - half);
+    int partner = (myid + half) % n_proc;
 
     // First we need to exchange list and pivot data
     int data[3] = {n1, n2, idx};
-    int partner_data[2];
-    MPI_Sendrecv(data, 3, MPI_INT, partner, 0, partner_data, 3, MPI_INT, partner, 0, communicator, NULL);
+    int partner_data[3];
+    MPI_Sendrecv(data, 3, MPI_INT, partner, 0, partner_data, 3, MPI_INT, partner, 0, communicator, MPI_STATUS_IGNORE);
 
     // Then we can actually exchange the lists
-    int *temp1, temp2;
     int* buf;
     if (myid < half) {
-        n1 = n1;
         int buf_n = partner_data[0];
         buf = malloc(sizeof(int) * buf_n);
-        MPI_Sendrecv(v2, n2, MPI_INT, partner, 0, buf, buf_n, MPI_INT, partner, 0, communicator, NULL);
+        MPI_Sendrecv(v2, n2, MPI_INT, partner, 0, buf, buf_n, MPI_INT, partner, 0, communicator, MPI_STATUS_IGNORE);
         n2 = buf_n;
         v2 = buf;
     } else {
         int buf_n = partner_data[1];
         buf = malloc(sizeof(int) * buf_n);
-        MPI_Sendrecv(v1, n1, MPI_INT, partner, 0, buf, buf_n, MPI_INT, partner, 0, communicator, NULL);
-        n2 = n2;
+        MPI_Sendrecv(v1, n1, MPI_INT, partner, 0, buf, buf_n, MPI_INT, partner, 0, communicator, MPI_STATUS_IGNORE);
         n1 = buf_n;
-        v2 = buf;
+        v1 = buf;
     }
-
-    free(buf);
 
     /*Merge the data into one list*/
     int* merged;
     merged = malloc((n1 + n2) * sizeof(int));
     merge_ascending(v1, n1, v2, n2, merged);
-    elements = &merged;
+    *elements = merged;
 
     /*Recurse*/
     int color;
@@ -156,9 +173,9 @@ int global_sort(int** elements, int n, MPI_Comm communicator, int pivot_strategy
 
     MPI_Comm recursion_comm;
     MPI_Comm_split(communicator, color, myid, &recursion_comm);
-    global_sort(elements, n1 + n2, communicator, pivot_strategy);
-    free(merged);
-    return n1 + n2;
+    n = global_sort(elements, n1 + n2, recursion_comm, pivot_strategy);
+    free(buf);
+    return n;
 }
 
 /**
@@ -192,10 +209,10 @@ int read_input(char* file_name, int** elements) {
 
     int* arr;
     arr = malloc(n * sizeof(int));
-    elements = &arr;
     for (int i = 0; i < n; i++)
         fscanf(file, "%d", &arr[i]);
 
+    *elements = arr;
     fclose(file);
     return n;
 }
