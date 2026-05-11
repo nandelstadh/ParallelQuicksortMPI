@@ -25,9 +25,9 @@ int main(int argc, char* argv[]) {
 
     n = read_input(input, &elements);
     local_n = distribute_from_root(elements, n, &my_elements);
-    qsort(my_elements, local_n, sizeof(int), compare);
 
     double start = MPI_Wtime();
+    qsort(my_elements, local_n, sizeof(int), compare);
     local_n = global_sort(&my_elements, local_n, MPI_COMM_WORLD, pivot_strategy);
     double time = MPI_Wtime() - start;
     double max_time;
@@ -35,7 +35,7 @@ int main(int argc, char* argv[]) {
 
     gather_on_root(elements, my_elements, local_n);
     if (myid == 0) {
-        printf("%d,%d,%d,%f\n", n, n_proc, pivot_strategy, max_time);
+        printf("%f\n", max_time);
         check_and_print(elements, n, output);
     }
 
@@ -225,6 +225,7 @@ int check_and_print(int* elements, int n, char* file_name) {
         for (int i = 0; i < n; i++) {
             fprintf(file, "%d ", elements[i]);
         }
+        fprintf(file, "\n");
         fclose(file);
         return 0;
     } else {
